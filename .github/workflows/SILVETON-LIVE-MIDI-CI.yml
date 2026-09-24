@@ -5,54 +5,161 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+env:
+  PROJECT_ARCHIVE: SILVETON-LIVE-MIDI.zip
+
 jobs:
   core-release:
     name: Core Release Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Prepare project sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f "$GITHUB_WORKSPACE/core/CMakeLists.txt" && -f "$GITHUB_WORKSPACE/android/settings.gradle.kts" ]]; then
+            src="$GITHUB_WORKSPACE"
+          else
+            archive="$GITHUB_WORKSPACE/$PROJECT_ARCHIVE"
+            if [[ ! -f "$archive" ]]; then
+              echo "::error::Project sources are not extracted and $PROJECT_ARCHIVE is missing."
+              exit 1
+            fi
+            dest="$RUNNER_TEMP/silveton-src"
+            rm -rf "$dest"
+            mkdir -p "$dest"
+            unzip -q "$archive" -d "$dest"
+            if [[ -f "$dest/core/CMakeLists.txt" && -f "$dest/android/settings.gradle.kts" ]]; then
+              src="$dest"
+            else
+              core_file="$(find "$dest" -mindepth 2 -maxdepth 4 -type f -path '*/core/CMakeLists.txt' -print -quit)"
+              if [[ -z "$core_file" ]]; then
+                echo "::error::Could not find core/CMakeLists.txt inside $PROJECT_ARCHIVE."
+                exit 1
+              fi
+              src="$(dirname "$(dirname "$core_file")")"
+            fi
+          fi
+          test -f "$src/core/CMakeLists.txt"
+          test -f "$src/android/settings.gradle.kts"
+          echo "SRC_DIR=$src" >> "$GITHUB_ENV"
+          echo "Using project sources from: $src"
+
       - name: Configure core (Release)
-        run: cmake -S core -B build-core -DSILVETON_LIVE_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
+        shell: bash
+        run: cmake -S "$SRC_DIR/core" -B "$RUNNER_TEMP/build-core" -DSILVETON_LIVE_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
 
       - name: Build core (Release)
-        run: cmake --build build-core -j 2
+        shell: bash
+        run: cmake --build "$RUNNER_TEMP/build-core" -j 2
 
       - name: Run core tests (Release)
-        run: ctest --test-dir build-core --output-on-failure
+        shell: bash
+        run: ctest --test-dir "$RUNNER_TEMP/build-core" --output-on-failure
 
   core-sanitizers:
     name: Core ASan + UBSan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Prepare project sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f "$GITHUB_WORKSPACE/core/CMakeLists.txt" && -f "$GITHUB_WORKSPACE/android/settings.gradle.kts" ]]; then
+            src="$GITHUB_WORKSPACE"
+          else
+            archive="$GITHUB_WORKSPACE/$PROJECT_ARCHIVE"
+            if [[ ! -f "$archive" ]]; then
+              echo "::error::Project sources are not extracted and $PROJECT_ARCHIVE is missing."
+              exit 1
+            fi
+            dest="$RUNNER_TEMP/silveton-src"
+            rm -rf "$dest"
+            mkdir -p "$dest"
+            unzip -q "$archive" -d "$dest"
+            if [[ -f "$dest/core/CMakeLists.txt" && -f "$dest/android/settings.gradle.kts" ]]; then
+              src="$dest"
+            else
+              core_file="$(find "$dest" -mindepth 2 -maxdepth 4 -type f -path '*/core/CMakeLists.txt' -print -quit)"
+              if [[ -z "$core_file" ]]; then
+                echo "::error::Could not find core/CMakeLists.txt inside $PROJECT_ARCHIVE."
+                exit 1
+              fi
+              src="$(dirname "$(dirname "$core_file")")"
+            fi
+          fi
+          test -f "$src/core/CMakeLists.txt"
+          test -f "$src/android/settings.gradle.kts"
+          echo "SRC_DIR=$src" >> "$GITHUB_ENV"
+          echo "Using project sources from: $src"
+
       - name: Configure core (ASan + UBSan)
+        shell: bash
         run: >-
-          cmake -S core -B build-sanitize
+          cmake -S "$SRC_DIR/core" -B "$RUNNER_TEMP/build-sanitize"
           -DSILVETON_LIVE_BUILD_TESTS=ON
           -DSILVETON_LIVE_ENABLE_SANITIZERS=ON
           -DCMAKE_BUILD_TYPE=Debug
 
       - name: Build core (ASan + UBSan)
-        run: cmake --build build-sanitize -j 2
+        shell: bash
+        run: cmake --build "$RUNNER_TEMP/build-sanitize" -j 2
 
       - name: Run sanitizer tests
+        shell: bash
         env:
-          ASAN_OPTIONS: detect_leaks=1
-        run: ctest --test-dir build-sanitize --output-on-failure
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ctest --test-dir "$RUNNER_TEMP/build-sanitize" --output-on-failure
 
   android-build:
     name: Android APK Build
-    runs-on: ubuntu-latest
-    needs:
-      - core-release
-      - core-sanitizers
+    runs-on: ubuntu-24.04
+    needs: [core-release, core-sanitizers]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Prepare project sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f "$GITHUB_WORKSPACE/core/CMakeLists.txt" && -f "$GITHUB_WORKSPACE/android/settings.gradle.kts" ]]; then
+            src="$GITHUB_WORKSPACE"
+          else
+            archive="$GITHUB_WORKSPACE/$PROJECT_ARCHIVE"
+            if [[ ! -f "$archive" ]]; then
+              echo "::error::Project sources are not extracted and $PROJECT_ARCHIVE is missing."
+              exit 1
+            fi
+            dest="$RUNNER_TEMP/silveton-src"
+            rm -rf "$dest"
+            mkdir -p "$dest"
+            unzip -q "$archive" -d "$dest"
+            if [[ -f "$dest/core/CMakeLists.txt" && -f "$dest/android/settings.gradle.kts" ]]; then
+              src="$dest"
+            else
+              core_file="$(find "$dest" -mindepth 2 -maxdepth 4 -type f -path '*/core/CMakeLists.txt' -print -quit)"
+              if [[ -z "$core_file" ]]; then
+                echo "::error::Could not find core/CMakeLists.txt inside $PROJECT_ARCHIVE."
+                exit 1
+              fi
+              src="$(dirname "$(dirname "$core_file")")"
+            fi
+          fi
+          test -f "$src/core/CMakeLists.txt"
+          test -f "$src/android/settings.gradle.kts"
+          echo "SRC_DIR=$src" >> "$GITHUB_ENV"
+          echo "Using project sources from: $src"
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -69,14 +176,26 @@ jobs:
           gradle-version: '8.9'
 
       - name: Install Android SDK packages
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
+        shell: bash
+        run: yes | sdkmanager --licenses >/dev/null || true; sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
 
       - name: Build debug APK
-        run: gradle -p android :app:assembleDebug --stacktrace
+        shell: bash
+        run: gradle -p "$SRC_DIR/android" :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$SRC_DIR/android/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$apk"
+          cp "$apk" "$GITHUB_WORKSPACE/SILVETON-LIVE-MIDI-debug.apk"
+          ls -lh "$GITHUB_WORKSPACE/SILVETON-LIVE-MIDI-debug.apk"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: SILVETON-LIVE-MIDI-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: SILVETON-LIVE-MIDI-debug.apk
           if-no-files-found: error
+          retention-days: 14
